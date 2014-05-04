@@ -42,6 +42,9 @@ coctx_swap:
 	leal 28(%esp),%esp
 
 	/* sp,ip */
+	/* param old ctx */
+	movl 4(%esp), %eax
+
 	movl (%esp), %ecx
 	movl %ecx, _eip(%eax)
 

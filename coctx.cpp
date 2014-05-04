@@ -57,8 +57,8 @@ int coctx_make( coctx_t *ctx,coctx_pfn_t pfn,const void *s,const void *s1 )
 	ctx->param->s1 = s;
 	ctx->param->s2 = s1;
 
-	n->regs[ ESP ] = (char*)(ctx->param) + sizeof(void*);
-	n->regs[ EIP ] = (char*)pfn;
+	ctx->regs[ ESP ] = (char*)(ctx->param) + sizeof(void*);
+	ctx->regs[ EIP ] = (char*)pfn;
 
 
 	return 0;

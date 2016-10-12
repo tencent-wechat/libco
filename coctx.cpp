@@ -22,6 +22,8 @@
 
 #define ESP 0
 #define EIP 1
+#define EAX 2
+#define ECX 3
 // -----------
 #define RSP 0
 #define RIP 1
@@ -29,6 +31,58 @@
 #define RDI 3
 #define RSI 4
 
+#define RBP 5
+#define R12 6
+#define R13 7
+#define R14 8
+#define R15 9
+#define RDX 10
+#define RCX 11
+#define R8 12
+#define R9 13
+
+
+//----- --------
+// 32 bit
+// | regs[0]: ret |
+// | regs[1]: ebx |
+// | regs[2]: ecx |
+// | regs[3]: edx |
+// | regs[4]: edi |
+// | regs[5]: esi |
+// | regs[6]: ebp |
+// | regs[7]: eax |  = esp
+enum
+{
+	kEIP = 0,
+	kESP = 7,
+};
+
+//-------------
+// 64 bit
+//low | regs[0]: r15 |
+//    | regs[1]: r14 |
+//    | regs[2]: r13 |
+//    | regs[3]: r12 |
+//    | regs[4]: r9  |
+//    | regs[5]: r8  | 
+//    | regs[6]: rbp |
+//    | regs[7]: rdi |
+//    | regs[8]: rsi |
+//    | regs[9]: ret |  //ret func addr
+//    | regs[10]: rdx |
+//    | regs[11]: rcx | 
+//    | regs[12]: rbx |
+//hig | regs[13]: rsp |
+enum
+{
+	kRDI = 7,
+	kRSI = 8,
+	kRETAddr = 9,
+	kRSP = 13,
+};
+
+//64 bit
 extern "C"
 {
 	extern void coctx_swap( coctx_t *,coctx_t* ) asm("coctx_swap");
@@ -41,59 +95,39 @@ int coctx_init( coctx_t *ctx )
 }
 int coctx_make( coctx_t *ctx,coctx_pfn_t pfn,const void *s,const void *s1 )
 {
+	//make room for coctx_param
+	char *sp = ctx->ss_sp + ctx->ss_size - sizeof(coctx_param_t);
+	sp = (char*)((unsigned long)sp & -16L);
 
-	char *sp = ctx->ss_sp + ctx->ss_size ;
-	sp = (char*)((unsigned long)sp & -16L); 
+	
+	coctx_param_t* param = (coctx_param_t*)sp ;
+	param->s1 = s;
+	param->s2 = s1;
 
-	int len = sizeof(coctx_param_t) + 64;
-	memset( sp - len,0,len );
-	ctx->routine = pfn;
-	ctx->s1 = s;
-	ctx->s2 = s1;
+	memset(ctx->regs, 0, sizeof(ctx->regs));
 
-	ctx->param = (coctx_param_t*)sp ;
-	ctx->param->f = pfn;	
-	ctx->param->f_link = 0;
-	ctx->param->s1 = s;
-	ctx->param->s2 = s1;
-
-	ctx->regs[ ESP ] = (char*)(ctx->param) + sizeof(void*);
-	ctx->regs[ EIP ] = (char*)pfn;
-
+	ctx->regs[ kESP ] = (char*)(sp) - sizeof(void*);
+	ctx->regs[ kEIP ] = (char*)pfn;
 
 	return 0;
 }
 #elif defined(__x86_64__)
 int coctx_make( coctx_t *ctx,coctx_pfn_t pfn,const void *s,const void *s1 )
 {
-	char *stack = ctx->ss_sp;
-	*stack = 0;
+	char *sp = ctx->ss_sp + ctx->ss_size;
+	sp = (char*) ((unsigned long)sp & -16LL  );
 
-	char *sp = stack + ctx->ss_size - 1;
-	sp = (char*)( ( (unsigned long)sp & -16LL ) - 8);
+	memset(ctx->regs, 0, sizeof(ctx->regs));
 
-	int len = sizeof(coctx_param_t) + 64;
-	memset( sp - len,0,len );
+	ctx->regs[ kRSP ] = sp - 8;
 
-	ctx->routine = pfn;
-	ctx->s1 = s;
-	ctx->s2 = s1;
+	ctx->regs[ kRETAddr] = (char*)pfn;
 
-	ctx->param = (coctx_param_t*)sp;
-	ctx->param->f = pfn;	
-	ctx->param->f_link = 0;
-	ctx->param->s1 = s;
-	ctx->param->s2 = s1;
-
-	ctx->regs[ RBX ] = stack + ctx->ss_size - 1;
-	ctx->regs[ RSP ] = (char*)(ctx->param) + 8;
-	ctx->regs[ RIP ] = (char*)pfn;
-
-	ctx->regs[ RDI ] = (char*)s;
-	ctx->regs[ RSI ] = (char*)s1;
-
+	ctx->regs[ kRDI ] = (char*)s;
+	ctx->regs[ kRSI ] = (char*)s1;
 	return 0;
 }
+
 int coctx_init( coctx_t *ctx )
 {
 	memset( ctx,0,sizeof(*ctx));
@@ -101,4 +135,12 @@ int coctx_init( coctx_t *ctx )
 }
 
 #endif
+
+
+//gzrd_Lib_CPP_Version_ID--start
+#ifndef GZRD_SVN_ATTR
+#define GZRD_SVN_ATTR "0"
+#endif
+static char gzrd_Lib_CPP_Version_ID[] __attribute__((used))="$HeadURL: http://tc-svn.tencent.com/pub/pub_libco_rep/libco_proj/trunk/coctx.cpp $ $Id: coctx.cpp 39 2016-09-29 07:26:29Z leiffyli $ " GZRD_SVN_ATTR "__file__";
+// gzrd_Lib_CPP_Version_ID--end
 

@@ -26,20 +26,51 @@ struct stCoSpec_t
 {
 	void *value;
 };
+
+struct stStackMem_t
+{
+	stCoRoutine_t* ocupy_co;
+	int stack_size;
+	char* stack_bp; //stack_buffer + stack_size
+	char* stack_buffer;
+
+};
+
+struct stShareStack_t
+{
+	unsigned int alloc_idx;
+	int stack_size;
+	int count;
+	stStackMem_t** stack_array;
+};
+
+
+
 struct stCoRoutine_t
 {
 	stCoRoutineEnv_t *env;
 	pfn_co_routine_t pfn;
 	void *arg;
-	//ucontext_t ctx;
 	coctx_t ctx;
+
 	char cStart;
 	char cEnd;
-	stCoSpec_t aSpec[1024];
 	char cIsMain;
 	char cEnableSysHook;
+	char cIsShareStack;
 
-	char sRunStack[ 1024 * 128 ];
+	void *pvEnv;
+
+	//char sRunStack[ 1024 * 128 ];
+	stStackMem_t* stack_mem;
+
+
+	//save satck buffer while confilct on same stack_buffer;
+	char* stack_sp; 
+	unsigned int save_size;
+	char* save_buffer;
+
+	stCoSpec_t aSpec[1024];
 
 };
 

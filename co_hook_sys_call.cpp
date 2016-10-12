@@ -37,9 +37,13 @@
 #include <stdarg.h>
 #include <pthread.h>
 
+#include <resolv.h>
+#include <netdb.h>
+
 #include <time.h>
 #include "co_routine.h"
 #include "co_routine_inner.h"
+#include "co_routine_specific.h"
 
 typedef long long ll64_t;
 
@@ -87,9 +91,12 @@ typedef struct tm *(*localtime_r_pfn_t)( const time_t *timep, struct tm *result 
 typedef void *(*pthread_getspecific_pfn_t)(pthread_key_t key);
 typedef int (*pthread_setspecific_pfn_t)(pthread_key_t key, const void *value);
 
-typedef int (*pthread_rwlock_rdlock_pfn_t)(pthread_rwlock_t *rwlock);
-typedef int (*pthread_rwlock_wrlock_pfn_t)(pthread_rwlock_t *rwlock);
-typedef int (*pthread_rwlock_unlock_pfn_t)(pthread_rwlock_t *rwlock);
+typedef int (*setenv_pfn_t)(const char *name, const char *value, int overwrite);
+typedef int (*unsetenv_pfn_t)(const char *name);
+typedef char *(*getenv_pfn_t)(const char *name);
+typedef hostent* (*gethostbyname_pfn_t)(const char *name);
+typedef res_state (*__res_state_pfn_t)();
+typedef int (*__poll_pfn_t)(struct pollfd fds[], nfds_t nfds, int timeout);
 
 static socket_pfn_t g_sys_socket_func 	= (socket_pfn_t)dlsym(RTLD_NEXT,"socket");
 static connect_pfn_t g_sys_connect_func = (connect_pfn_t)dlsym(RTLD_NEXT,"connect");
@@ -109,6 +116,16 @@ static poll_pfn_t g_sys_poll_func 		= (poll_pfn_t)dlsym(RTLD_NEXT,"poll");
 static setsockopt_pfn_t g_sys_setsockopt_func 
 										= (setsockopt_pfn_t)dlsym(RTLD_NEXT,"setsockopt");
 static fcntl_pfn_t g_sys_fcntl_func 	= (fcntl_pfn_t)dlsym(RTLD_NEXT,"fcntl");
+
+static setenv_pfn_t g_sys_setenv_func   = (setenv_pfn_t)dlsym(RTLD_NEXT,"setenv");
+static unsetenv_pfn_t g_sys_unsetenv_func = (unsetenv_pfn_t)dlsym(RTLD_NEXT,"unsetenv");
+static getenv_pfn_t g_sys_getenv_func   =  (getenv_pfn_t)dlsym(RTLD_NEXT,"getenv");
+static __res_state_pfn_t g_sys___res_state_func  = (__res_state_pfn_t)dlsym(RTLD_NEXT,"__res_state");
+
+static gethostbyname_pfn_t g_sys_gethostbyname_func = (gethostbyname_pfn_t)dlsym(RTLD_NEXT, "gethostbyname");
+
+static __poll_pfn_t g_sys___poll_func = (__poll_pfn_t)dlsym(RTLD_NEXT, "__poll");
+
 
 /*
 static pthread_getspecific_pfn_t g_sys_pthread_getspecific_func 
@@ -225,7 +242,7 @@ int co_accept( int fd, struct sockaddr *addr, socklen_t *len )
 	{
 		return cli;
 	}
-	//rpchook_t *lp = alloc_by_fd( cli );
+	alloc_by_fd( cli );
 	return cli;
 }
 
@@ -628,79 +645,240 @@ int fcntl(int fildes, int cmd, ...)
 
 	return ret;
 }
-/*
-void *pthread_getspecific(pthread_key_t key)
-{
-	HOOK_SYS_FUNC( pthread_getspecific );
 
-	//printf("hook_getspec (%ld)\n",(long)key);
-	return g_sys_pthread_getspecific_func( key ); 
-}
-int pthread_setspecific(pthread_key_t key, const void *value)
+struct stCoSysEnv_t
 {
-	HOOK_SYS_FUNC( pthread_setspecific );
-	//printf("hook_setspec (%ld)\n",(long)key);
-	return g_sys_pthread_setspecific_func( key,value );
-}
-
-struct tm *localtime_r( const time_t *timep, struct tm *result )
+	char *name;	
+	char *value;
+};
+struct stCoSysEnvArr_t
 {
-	if( result )
+	stCoSysEnv_t *data;
+	size_t cnt;
+};
+static stCoSysEnvArr_t *dup_co_sysenv_arr( stCoSysEnvArr_t * arr )
+{
+	stCoSysEnvArr_t *lp = (stCoSysEnvArr_t*)calloc( sizeof(stCoSysEnvArr_t),1 );	
+	if( arr->cnt )
 	{
-		memset( result,0,sizeof(*result) );
+		lp->data = (stCoSysEnv_t*)calloc( sizeof(stCoSysEnv_t) * arr->cnt,1 );
+		lp->cnt = arr->cnt;
+		memcpy( lp->data,arr->data,sizeof( stCoSysEnv_t ) * arr->cnt );
 	}
-	return result;
-}
-*/
-
-//static int g_rwlock_cnt[ 65536 ] = { 0 };
-/*
-static pid_t __GetThreadPid()
-{
-	char **p = (char**)pthread_self();
-	return p ? *(pid_t*)(p + 18) : 0;
+	return lp;
 }
 
+static int co_sysenv_comp(const void *a, const void *b)
+{
+	return strcmp(((stCoSysEnv_t*)a)->name, ((stCoSysEnv_t*)b)->name); 
+}
+static stCoSysEnvArr_t g_co_sysenv = { 0 };
 
-int pthread_rwlock_rdlock(pthread_rwlock_t *rwlock)
-{
-	HOOK_SYS_FUNC( pthread_rwlock_rdlock )
-	pid_t pid = __GetThreadPid();
-	int ret = g_sys_pthread_rwlock_rdlock_func(rwlock);
-	//++g_rwlock_cnt[ pid ];
-	return ret;
-}
-int pthread_rwlock_wrlock(pthread_rwlock_t *rwlock)
-{
-	HOOK_SYS_FUNC( pthread_rwlock_wrlock )
-	pid_t pid = __GetThreadPid();
-	int ret = g_sys_pthread_rwlock_wrlock_func(rwlock);
-	//++g_rwlock_cnt[ pid ];
-	return ret;
-}
-int pthread_rwlock_unlock(pthread_rwlock_t *rwlock)
-{
-	HOOK_SYS_FUNC( pthread_rwlock_unlock )
-	pid_t pid = __GetThreadPid();
-	int ret = g_sys_pthread_rwlock_unlock_func(rwlock);
-	//--g_rwlock_cnt[ pid ];
-	return ret;
-}
-*/
-/*
-int GetThreadRWLockCnt( )
-{
-	return g_rwlock_cnt[ __GetThreadPid() ];
-}
-*/
-//g++ -O2 -fPIC  -DLINUX -pipe -c rpchook_sys_call.cpp  -o rpcdump.o
-//g++ -fPIC -shared -O2 -pipe rpcdump.o -o librpcdump.so
-//export LD_PRELOAD=$PWD/librpcdump.so
-//./test_kvcli_cpu batch_str str_kvsvr_cli.conf  1000
-//export LD_PRELOAD=;    
-//~/QQMail/comm2/svrkit> vi skutils.cpp 
 
-//gzrd_Lib_CPP_Version_ID--start
+  
+void co_set_env_list( const char *name[],size_t cnt)
+{
+	if( g_co_sysenv.data )
+	{
+		return ;
+	}
+	g_co_sysenv.data = (stCoSysEnv_t*)calloc( 1,sizeof(stCoSysEnv_t) * cnt  );
+
+	for(size_t i=0;i<cnt;i++)
+	{
+		if( name[i] && name[i][0] )
+		{
+			g_co_sysenv.data[ g_co_sysenv.cnt++ ].name = strdup( name[i] );
+		}
+	}
+	if( g_co_sysenv.cnt > 1 )
+	{
+		qsort( g_co_sysenv.data,g_co_sysenv.cnt,sizeof(stCoSysEnv_t),co_sysenv_comp );
+		stCoSysEnv_t *lp = g_co_sysenv.data;
+		stCoSysEnv_t *lq = g_co_sysenv.data + 1;
+		for(size_t i=1;i<g_co_sysenv.cnt;i++)
+		{
+			if( strcmp( lp->name,lq->name ) )
+			{
+				++lp;
+				if( lq != lp  )
+				{
+					*lp = *lq;
+				}
+			}
+			++lq;
+		}
+		g_co_sysenv.cnt = lp - g_co_sysenv.data + 1;
+	}
+
+}
+
+int setenv(const char *n, const char *value, int overwrite)
+{
+	HOOK_SYS_FUNC( setenv )
+	if( co_is_enable_sys_hook() && g_co_sysenv.data )
+	{
+		stCoRoutine_t *self = co_self();
+		if( self )
+		{
+			if( !self->pvEnv )
+			{
+				self->pvEnv = dup_co_sysenv_arr( &g_co_sysenv );
+			}
+			stCoSysEnvArr_t *arr = (stCoSysEnvArr_t*)(self->pvEnv);
+
+			stCoSysEnv_t name = { (char*)n,0 };
+
+			stCoSysEnv_t *e = (stCoSysEnv_t*)bsearch( &name,arr->data,arr->cnt,sizeof(name),co_sysenv_comp );
+
+			if( e )
+			{
+				if( overwrite || !e->value  )
+				{
+					if( e->value ) free( e->value );
+					e->value = ( value ? strdup( value ) : 0 );
+				}
+				return 0;
+			}
+		}
+
+	}
+	return g_sys_setenv_func( n,value,overwrite );
+}
+int unsetenv(const char *n)
+{
+	HOOK_SYS_FUNC( unsetenv )
+	if( co_is_enable_sys_hook() && g_co_sysenv.data )
+	{
+		stCoRoutine_t *self = co_self();
+		if( self )
+		{
+			if( !self->pvEnv )
+			{
+				self->pvEnv = dup_co_sysenv_arr( &g_co_sysenv );
+			}
+			stCoSysEnvArr_t *arr = (stCoSysEnvArr_t*)(self->pvEnv);
+
+			stCoSysEnv_t name = { (char*)n,0 };
+
+			stCoSysEnv_t *e = (stCoSysEnv_t*)bsearch( &name,arr->data,arr->cnt,sizeof(name),co_sysenv_comp );
+
+			if( e )
+			{
+				if( e->value )
+				{
+					free( e->value );
+					e->value = 0;
+				}
+				return 0;
+			}
+		}
+
+	}
+	return g_sys_unsetenv_func( n );
+}
+char *getenv( const char *n )
+{
+	HOOK_SYS_FUNC( getenv )
+	if( co_is_enable_sys_hook() && g_co_sysenv.data )
+	{
+		stCoRoutine_t *self = co_self();
+
+		stCoSysEnv_t name = { (char*)n,0 };
+
+		if( !self->pvEnv )
+		{
+			self->pvEnv = dup_co_sysenv_arr( &g_co_sysenv );
+		}
+		stCoSysEnvArr_t *arr = (stCoSysEnvArr_t*)(self->pvEnv);
+
+		stCoSysEnv_t *e = (stCoSysEnv_t*)bsearch( &name,arr->data,arr->cnt,sizeof(name),co_sysenv_comp );
+
+		if( e )
+		{
+			return e->value;
+		}
+
+	}
+	return g_sys_getenv_func( n );
+
+}
+
+struct res_state_wrap
+{
+	struct __res_state state;
+};
+CO_ROUTINE_SPECIFIC(res_state_wrap, __co_state_wrap);
+
+extern "C"
+{
+	res_state __res_state() 
+	{
+		HOOK_SYS_FUNC(__res_state);
+
+		if (!co_is_enable_sys_hook()) 
+		{
+			return g_sys___res_state_func();
+		}
+
+		return &(__co_state_wrap->state);
+	}
+	int __poll(struct pollfd fds[], nfds_t nfds, int timeout)
+	{
+		return poll(fds, nfds, timeout);
+	}
+}
+
+struct hostbuf_wrap 
+{
+	struct hostent host;
+	char* buffer;
+	size_t iBufferSize;
+	int host_errno;
+};
+
+CO_ROUTINE_SPECIFIC(hostbuf_wrap, __co_hostbuf_wrap);
+
+struct hostent *co_gethostbyname(const char *name)
+{
+	if (!name)
+	{
+		return NULL;
+	}
+
+	if (__co_hostbuf_wrap->buffer && __co_hostbuf_wrap->iBufferSize > 1024)
+	{
+		free(__co_hostbuf_wrap->buffer);
+		__co_hostbuf_wrap->buffer = NULL;
+	}
+	if (!__co_hostbuf_wrap->buffer)
+	{
+		__co_hostbuf_wrap->buffer = (char*)malloc(1024);
+		__co_hostbuf_wrap->iBufferSize = 1024;
+	}
+
+	struct hostent *host = &__co_hostbuf_wrap->host;
+	struct hostent *result = NULL;
+	int *h_errnop = &(__co_hostbuf_wrap->host_errno);
+
+	int ret = -1;
+	while (ret = gethostbyname_r(name, host, __co_hostbuf_wrap->buffer, 
+				__co_hostbuf_wrap->iBufferSize, &result, h_errnop) == ERANGE && 
+				*h_errnop == NETDB_INTERNAL )
+	{
+		free(__co_hostbuf_wrap->buffer);
+		__co_hostbuf_wrap->iBufferSize = __co_hostbuf_wrap->iBufferSize * 2;
+		__co_hostbuf_wrap->buffer = (char*)malloc(__co_hostbuf_wrap->iBufferSize);
+	}
+
+	if (ret == 0 && (host == result)) 
+	{
+		return host;
+	}
+	return NULL;
+}
+
+
 void co_enable_hook_sys() //这函数必须在这里,否则本文件会被忽略！！！
 {
 	stCoRoutine_t *co = GetCurrThreadCo();
@@ -709,4 +887,12 @@ void co_enable_hook_sys() //这函数必须在这里,否则本文件会被忽略！！！
 		co->cEnableSysHook = 1;
 	}
 }
+
+
+//gzrd_Lib_CPP_Version_ID--start
+#ifndef GZRD_SVN_ATTR
+#define GZRD_SVN_ATTR "0"
+#endif
+static char gzrd_Lib_CPP_Version_ID[] __attribute__((used))="$HeadURL$ $Id$ " GZRD_SVN_ATTR "__file__";
+// gzrd_Lib_CPP_Version_ID--end
 

@@ -33,6 +33,7 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <signal.h>
 
 using namespace std;
 struct stEndPoint

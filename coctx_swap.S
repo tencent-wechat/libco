@@ -16,106 +16,80 @@
 * limitations under the License.
 */
 
-#define _esp 0
-#define _eip 4
-/* ------ */
-#define _rsp 0
-#define _rip 8
-#define _rbx 16
-#define _rdi 24
-#define _rsi 32
-
-.globl coctx_swap 
+.globl coctx_swap
+#if !defined( __APPLE__ )
 .type  coctx_swap, @function
+#endif
 coctx_swap:
 
 #if defined(__i386__)
+	leal 4(%esp), %eax //sp 
+	movl 4(%esp), %esp 
+	leal 32(%esp), %esp //parm a : &regs[7] + sizeof(void*)
 
-	leal -4(%esp),%esp
-	pushl %ebx
-	pushl %ecx
-	pushl %edx
+	pushl %eax //esp ->parm a 
 
-	pushl %edi
-	pushl %esi
 	pushl %ebp
-	leal 28(%esp),%esp
-
-	/* sp,ip */
-	/* param old ctx */
-	movl 4(%esp), %eax
-
-	movl (%esp), %ecx
-	movl %ecx, _eip(%eax)
-
-	leal 4(%esp), %ecx
-	movl %ecx, _esp(%eax)
-
-	/* param new ctx */
-	movl 8(%esp), %eax
-
-	/* push ret ( ip,sp ) */
-	movl _eip(%eax), %ecx
-	movl _esp(%eax), %esp
+	pushl %esi
+	pushl %edi
+	pushl %edx
 	pushl %ecx
+	pushl %ebx
+	pushl -4(%eax)
 
-	leal -28(%esp),%esp
-	popl %ebp
-	popl %esi
-	popl %edi
-
-	popl %edx
-	popl %ecx
-	popl %ebx
-	leal 4(%esp),%esp
 	
-	movl $0, %eax
+	movl 4(%eax), %esp //parm b -> &regs[0]
+
+	popl %eax  //ret func addr
+	popl %ebx  
+	popl %ecx
+	popl %edx
+	popl %edi
+	popl %esi
+	popl %ebp
+	popl %esp
+	pushl %eax //set ret func addr
+
+	xorl %eax, %eax
 	ret
 
 #elif defined(__x86_64__)
+	leaq 8(%rsp),%rax
+	leaq 112(%rdi),%rsp
+	pushq %rax
+	pushq %rbx
+	pushq %rcx
+	pushq %rdx
 
-	leaq -8(%rsp),%rsp
+	pushq -8(%rax) //ret func addr
+
+	pushq %rsi
+	pushq %rdi
 	pushq %rbp
+	pushq %r8
+	pushq %r9
 	pushq %r12
 	pushq %r13
 	pushq %r14
 	pushq %r15
-	pushq %rdx
-	pushq %rcx	
-	pushq %r8
-	pushq %r9
-	leaq 80(%rsp),%rsp	
-
-	movq %rbx,_rbx(%rdi)
-	movq %rdi,_rdi(%rdi)
-	movq %rsi,_rsi(%rdi)
-	/* sp */
-	movq (%rsp), %rcx
-	movq %rcx, _rip(%rdi)
-	leaq 8(%rsp), %rcx		
-	movq %rcx, _rsp(%rdi)
-
-	/* sp */
-	movq _rip(%rsi), %rcx
-	movq _rsp(%rsi), %rsp
-	pushq %rcx
-
-	movq _rbx(%rsi),%rbx
-	movq _rdi(%rsi),%rdi
-	movq _rsi(%rsi),%rsi
-
-	leaq -80(%rsp),%rsp
-	popq %r9
-	popq %r8
-	popq %rcx	
-	popq %rdx
+	
+	movq %rsi, %rsp
 	popq %r15
 	popq %r14
 	popq %r13
 	popq %r12
+	popq %r9
+	popq %r8
 	popq %rbp
-	leaq 8(%rsp),%rsp	
-
+	popq %rdi
+	popq %rsi
+	popq %rax //ret func addr
+	popq %rdx
+	popq %rcx
+	popq %rbx
+	popq %rsp
+	pushq %rax
+	
 	xorl %eax, %eax
 	ret
 #endif

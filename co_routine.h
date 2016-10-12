@@ -19,18 +19,24 @@
 #ifndef __CO_ROUTINE_H__
 #define __CO_ROUTINE_H__
 
-#include <ucontext.h>
 #include <stdint.h>
 #include <sys/poll.h>
+#include <pthread.h>
 
 //1.struct
 
 struct stCoRoutine_t;
+struct stShareStack_t;
+
 struct stCoRoutineAttr_t
 {
 	int stack_size;
-	char reserve[ 60 ];
-
+	stShareStack_t*  share_stack;
+	stCoRoutineAttr_t()
+	{
+		stack_size = 128 * 1024;
+		share_stack = NULL;
+	}
 }__attribute__ ((packed));
 
 struct stCoEpoll_t;
@@ -64,6 +70,22 @@ stCoEpoll_t * 	co_get_epoll_ct(); //ct = current thread
 void 	co_enable_hook_sys();  
 void 	co_disable_hook_sys();  
 bool 	co_is_enable_sys_hook();
+
+//6.sync
+struct stCoCond_t;
+
+stCoCond_t *co_cond_alloc();
+int co_cond_free( stCoCond_t * cc );
+
+int co_cond_signal( stCoCond_t * );
+int co_cond_broadcast( stCoCond_t * );
+int co_cond_timedwait( stCoCond_t *,int timeout_ms );
+
+//7.share stack
+stShareStack_t* co_alloc_sharestack(int iCount, int iStackSize);
+
+//8.init envlist for hook get/set env
+void co_set_env_list( const char *name[],size_t cnt);
 
 void co_log_err( const char *fmt,... );
 #endif

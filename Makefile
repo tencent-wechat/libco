@@ -25,9 +25,15 @@ include co.mk
 
 ########## options ##########
 CFLAGS += -g -fno-strict-aliasing -O2 -Wall -export-dynamic \
-	-Wall -pipe  -D_GNU_SOURCE -D_REENTRANT -fPIC -Wno-deprecated -m64
+	-Wall -pipe  -D_GNU_SOURCE -D_REENTRANT -fPIC -Wno-deprecated
+LINKS += -g -L./lib -lcolib -lpthread -ldl
 
-LINKS += -g -L./lib -lcolib -lpthread -ldl 
+cpu_bit=$(shell getconf LONG_BIT)
+ifeq ($(cpu_bit), 64)
+	CFLAGS += -m64
+else
+	CFLAGS += -m32
+endif
 
 COLIB_OBJS=co_epoll.o co_routine.o co_hook_sys_call.o coctx_swap.o coctx.o
 #co_swapcontext.o

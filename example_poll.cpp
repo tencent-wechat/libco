@@ -113,7 +113,7 @@ static void *poll_routine( void *arg )
 		v[i].fd = fd;
 
 		int ret = connect(fd,(struct sockaddr*)&v[i].addr,sizeof( v[i].addr )); 
-		printf("co %p connect i %ld ret %d errno %d (%s)\n",
+		printf("co %p connect i %zd ret %d errno %d (%s)\n",
 			co_self(),i,ret,errno,strerror(errno));
 	}
 	struct pollfd *pf = (struct pollfd*)calloc( 1,sizeof(struct pollfd) * v.size() );
@@ -128,7 +128,7 @@ static void *poll_routine( void *arg )
 	for(;;)
 	{
 		int ret = poll( pf,iWaitCnt,1000 );
-		printf("co %p poll wait %ld ret %d\n",
+		printf("co %p poll wait %zd ret %d\n",
 				co_self(),iWaitCnt,ret);
 		for(int i=0;i<ret;i++)
 		{
@@ -168,7 +168,7 @@ static void *poll_routine( void *arg )
 		v[i].fd = -1;
 	}
 
-	printf("co %p task cnt %ld fire %ld\n",
+	printf("co %p task cnt %zd fire %zd\n",
 			co_self(),v.size(),setRaiseFds.size() );
 	return 0;
 }

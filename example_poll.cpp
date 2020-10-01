@@ -113,7 +113,8 @@ static void *poll_routine( void *arg )
 		v[i].fd = fd;
 
 		int ret = connect(fd,(struct sockaddr*)&v[i].addr,sizeof( v[i].addr )); 
-		printf("co %p connect i %ld ret %d errno %d (%s)\n",
+		printf("co %p connect i %zd ret %d errno %d (%s)\n",
+		       
 			co_self(),i,ret,errno,strerror(errno));
 	}
 	struct pollfd *pf = (struct pollfd*)calloc( 1,sizeof(struct pollfd) * v.size() );
